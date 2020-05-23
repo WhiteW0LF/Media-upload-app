@@ -1,27 +1,33 @@
-import { defaultRegion, myBucket } from './env';
+import { authCfg, defaultRegion, myBucket, registerRequest, loginRequest, confirmRequest, apiUrl } from './env';
 import AWS from 'aws-sdk/global';
 import S3 from 'aws-sdk/clients/s3';
-import { registerUser } from './user-actions/register-user';
-import { confirmAccount } from './user-actions/confirm-user';
-import { login } from './user-actions/login-user';
-import { refreshSession } from './user-actions/refresh-session';
+import { AuthorizationService } from './services/authorization.service';
+
+import './main.scss';
 
 AWS.config.region = defaultRegion;
+
+const auth = new AuthorizationService(authCfg, AWS.config);
 
 const registerButton = document.querySelector('.registerUser');
 const confirmButton = document.querySelector('.confirmUser');
 const loginButton = document.querySelector('.loginUser');
-
+const logoutButton = document.querySelector('.logout');
+const progressBar = document.querySelector('.progress-bar');
+const uplodedFilesListEl = document.querySelector('.uploadedFiles');
+const uploadInput = document.querySelector('.uploadInput');
+const uploadButton = document.querySelector('.uploadButton');
+const listItemsInBucketButton = document.querySelector('.listItems');
+const orderAnimationButton = document.querySelector('.orderAnimation');
 
 const greetUser = (userName) => {
     const greetEl = document.querySelector('.greet');
     greetEl.textContent = `Hello ${userName} !`;
 };
 
-
 //EVENT LISTENERS
 registerButton.addEventListener('click', () => {
-    registerUser()
+    auth.registerUser(registerRequest)
         .then(result => {
             console.log(result);
         })
@@ -31,7 +37,7 @@ registerButton.addEventListener('click', () => {
 });
 
 confirmButton.addEventListener('click', () => {
-    confirmAccount()
+    auth.confirmAccount(confirmRequest)
         .then(res => {
             console.log(res);
         })
@@ -41,18 +47,24 @@ confirmButton.addEventListener('click', () => {
 });
 
 loginButton.addEventListener('click', () => {
-    login()
-        .then(res => refreshSession())
+    auth.login(loginRequest)
+        .then(res => auth.refreshSession())
         .then(user => greetUser(user.nickname))
         .catch(err => {
             console.log(err);
         });
 });
 
+logoutButton.addEventListener('click', () => {
+    auth.logout(loginRequest);
+});
+
 //refresh session
 (() => {
-    refreshSession()
-        .then(user => greetUser(user.nickname))
+    auth.refreshSession()
+        .then(user => {
+            greetUser(user.nickname);
+        })
         .catch(err => {
             console.log(err);
             greetUser('guest');
@@ -61,11 +73,12 @@ loginButton.addEventListener('click', () => {
 
 
 const listFilesInBucket = () => {
-    const s3 = new S3();
     const params = {
         Bucket: myBucket,
         MaxKeys: 100
     };
+
+    const s3 = new S3();
 
     s3.listObjects(params, (err, result) => {
         if (err) {
@@ -77,7 +90,98 @@ const listFilesInBucket = () => {
 };
 
 //list bucket items
-const listItemsInBucketButton = document.querySelector('.listItems');
+
 listItemsInBucketButton.addEventListener('click', () => {
     listFilesInBucket();
+});
+
+
+const uploadToS3 = (file) => {
+    const userId = AWS.config.credentials.identityId;
+    console.log(userId);
+    const params = {
+        Body: file,
+        Bucket: myBucket,
+        Key: `uek-krakow/${userId}/photos/${file.name}`
+    };
+    const s3 = new S3();
+
+
+    return new Promise((resolve, reject) => {
+        s3.putObject(params, (err, result) => {
+            if (err) {
+                reject(err);
+            }
+
+            resolve(params.Key);
+        }).on('httpUploadProgress', (progress) => {
+            const value = Math.round((progress.loaded / progress.total) * 100);
+            progressBar.setAttribute('aria-valuenow', value);
+            progressBar.setAttribute('style', `width: ${value}%`);
+        });
+    });
+};
+
+const getSignedURL = (key) => {
+    const s3 = new S3();
+    const params = {
+        Bucket: myBucket,
+        Key: key
+    };
+    return s3.getSignedUrl('getObject', params);
+};
+const createHtmlElFromStr = (str) => {
+    let parent = document.createElement('div');
+    parent.innerHTML = str.trim();
+    return parent.firstChild;
+};
+
+const addToUploadetFiles = (url) => {
+    const img = `<img src="${url}" alt="img" class="img-thumbnail">`;
+    uplodedFilesListEl.children[0].appendChild(createHtmlElFromStr(img));
+};
+
+uploadButton.addEventListener('click', () => {
+    if (uploadInput.files.length === 0) {
+        return;
+    }
+
+    const filesToUpload = [...uploadInput.files];
+    filesToUpload.forEach((file, i) => {
+        uploadToS3(file)
+            .then(r => getSignedURL(r))
+            .then(url => addToUploadetFiles(url))
+            .finally(() => {
+                uploadInput.value = "";
+                progressBar.setAttribute('aria-valuenow', 0);
+                progressBar.setAttribute('style', 'width: 0%');
+            })
+            .catch(err => {
+                console.log(err);
+            });
+    });
+});
+// ORDER ANIMATION
+const orderAnimation = (photos) => {
+    return auth.getAccesToken()
+        .then(token => {
+            return fetch(`${apiUrl}/orders`, {
+                method: 'POST',
+                headers: {
+                    'Content-type': 'application/json',
+                    'Authorization': token
+                },
+                body: JSON.stringify(photos)
+            });
+        });
+};
+
+orderAnimationButton.addEventListener('click', () => {
+    orderAnimation()
+        .then(res => {
+            console.log(res);
+        })
+        .catch(err => {
+            console.log(err);
+        });
 });
