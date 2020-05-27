@@ -95,8 +95,13 @@ listItemsInBucketButton.addEventListener('click', () => {
     listFilesInBucket();
 });
 
+const httpUploadProgressHandler = (progress) => {
+    const value = Math.round((progress.loaded / progress.total) * 100);
+    progressBar.setAttribute('aria-valuenow', value);
+    progressBar.setAttribute('style', `width: ${value}%`);
+};
 
-const uploadToS3 = (file) => {
+const uploadToS3 = (file, progressHandler) => {
     const userId = AWS.config.credentials.identityId;
     console.log(userId);
     const params = {
@@ -114,11 +119,7 @@ const uploadToS3 = (file) => {
             }
 
             resolve(params.Key);
-        }).on('httpUploadProgress', (progress) => {
-            const value = Math.round((progress.loaded / progress.total) * 100);
-            progressBar.setAttribute('aria-valuenow', value);
-            progressBar.setAttribute('style', `width: ${value}%`);
-        });
+        }).on('httpUploadProgress', progressHandler);
     });
 };
 
@@ -136,9 +137,11 @@ const createHtmlElFromStr = (str) => {
     return parent.firstChild;
 };
 
+let photosToBeTransformed = [];
+
 const addToUploadetFiles = (url) => {
     const img = `<img src="${url}" alt="img" class="img-thumbnail">`;
-    uplodedFilesListEl.children[0].appendChild(createHtmlElFromStr(img));
+    uplodedFilesListEl.children[(photosToBeTransformed.length - 1) % 4].appendChild(createHtmlElFromStr(img));
 };
 
 uploadButton.addEventListener('click', () => {
@@ -148,7 +151,11 @@ uploadButton.addEventListener('click', () => {
 
     const filesToUpload = [...uploadInput.files];
     filesToUpload.forEach((file, i) => {
-        uploadToS3(file)
+        uploadToS3(file, httpUploadProgressHandler)
+            .then(key => {
+                photosToBeTransformed = [...photosToBeTransformed, key];
+                return key;
+            })
             .then(r => getSignedURL(r))
             .then(url => addToUploadetFiles(url))
             .finally(() => {
@@ -162,7 +169,7 @@ uploadButton.addEventListener('click', () => {
     });
 });
 // ORDER ANIMATION
-const orderAnimation = (photos) => {
+const orderAnimation = (photos, email) => {
     return auth.getAccesToken()
         .then(token => {
             return fetch(`${apiUrl}/orders`, {
@@ -171,13 +178,14 @@ const orderAnimation = (photos) => {
                     'Content-type': 'application/json',
                     'Authorization': token
                 },
-                body: JSON.stringify(photos)
+                body: JSON.stringify({ "photos": photos, "email": email })
             });
         });
 };
 
 orderAnimationButton.addEventListener('click', () => {
-    orderAnimation()
+     auth.refreshSession()
+        .then(user => orderAnimation(photosToBeTransformed, user.email))
         .then(res => {
             console.log(res);
         })
