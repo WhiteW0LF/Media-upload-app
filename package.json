@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "aws-amplify": "^2.2.6",
-    "aws-sdk": "^2.639.0"
+    "aws-sdk": "^2.814.0"
   },
   "scripts": {
     "build": "yarn webpack",
